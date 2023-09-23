@@ -1,28 +1,192 @@
 ---
-title: ""
-author: ""
+title: "Lab 4"
+author: "Jayson De La O"
 format:
   html:
     embed-resources: true
 ---
 
-## Quarto
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+Steps
+1. Read in the data
+First download and then read in with data.table::fread()
 
 ```{r}
-1 + 1
+library(tidyverse)
+library(data.table)
+library(leaflet)
 ```
 
-You can add options to executable code like this
 
 ```{r}
-#| echo: false
-2 * 2
+if (!file.exists("met_all.gz"))
+  download.file(
+    url = "https://raw.githubusercontent.com/USCbiostats/data-science-data/master/02_met/met_all.gz",
+    destfile = "met_all.gz",
+    method   = "libcurl",
+    timeout  = 60
+    )
+met <- data.table::fread("met_all.gz")
+```
+Remove temperatures less than -17C
+Make sure there are no missing data in the key variables coded as 9999, 999, etc
+Generate a date variable using the functions as.Date() (hint: You will need the following to create a date paste(year, month, day, sep = "-")).
+Using the data.table::week function, keep the observations of the first week of the month.
+Compute the mean by station of the variables temp, rh, wind.sp, vis.dist, dew.point, lat, lon, and elev.
+Create a region variable for NW, SW, NE, SE based on lon = -98.00 and lat = 39.71 degrees
+Create a categorical variable for elevation as in the lecture slides
+```{r}
+summary(met$temp)
+met <- met[temp>=-17]
+summary(met$temp)
+summary(met)
+
+met[met$elev==9999.0] <- NA
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+```{r}
+met$date<-as.Date(paste(met$year, met$month, met$day, sep = "-"))
+```
+
+```{r}
+met$week <- data.table::week(met$date)
+tail(met)
+start <- as.Date("2019-08-01")
+end <- as.Date("2019-08-07")
+```
+```{r}
+metfw<- met[met$date >= start & met$date <=end]
+metfw
+```
+
+```{r}
+metfw_avg<- metfw[,.(
+   temp     = mean(temp,na.rm=TRUE),
+  rh       = mean(rh,na.rm=TRUE),
+  wind.sp  = mean(wind.sp,na.rm=TRUE),
+  vis.dist = mean(vis.dist,na.rm=TRUE),
+  dew.point  = mean(dew.point,na.rm=TRUE),
+  lat      = mean(lat),
+  lon      = mean(lon), 
+  elev     = mean(elev,na.rm=TRUE)
+),by =c("USAFID")]
+
+metfw_avg
+
+```
+
+```{r}
+metfw_avg$region <- ifelse(metfw_avg$lon > -98 & metfw_avg$lat > 39.71,"NE",
+                       ifelse(metfw_avg$lon > -98 & metfw_avg$lat <39.71,"NW",
+                              ifelse(metfw_avg$lon < -98 & metfw_avg$lat > 39.71,"SE",
+                       ifelse(metfw_avg$lon < -98 & metfw_avg$lat <39.71,"SW",NA))))
+                              
+unique(metfw_avg$region)
+```
+The graphs shows that the south (SW/SE) have longer range of dew points, while the North (NW/NE) has a smaller range, but higher overall dew points.
+Wind speeds seems to be relative equal throughout the regions, but seems to be slightly higher in the south.
+```{r}
+metfw_avg[,elev_cat := fifelse(elev > 252, "high","low")]
+
+
+```
+```{r}
+metfw_avg[!is.na(wind.sp) & !is.na(dew.point) & !is.na(region)] %>%
+  ggplot()+
+  geom_violin(mapping=aes(x=1,y=dew.point,fill=region))+
+  facet_wrap(~region,nrow=1)
+
+metfw_avg[!is.na(wind.sp)& !is.na(dew.point) & !is.na(region)] %>%
+  ggplot()+
+  geom_violin(mapping=aes(x=1,y=wind.sp,fill=region))+
+  facet_wrap(~region,nrow=1)
+
+
+```
+Wind speed and dew point seem to be relatively linear for each of the regions. Showing that wind speed has an affect on dew point.
+
+```{r}
+metfw_avg[!is.na(wind.sp)& !is.na(dew.point) & !is.na(region)] %>%
+ ggplot( aes(x=dew.point,y=wind.sp,color=region ))+
+  geom_jitter(width=.2,height=0)+
+  stat_smooth(method=lm,aes(group=region))+
+    scale_color_manual(values=c("NE"="blue","SE"="green","NW"="black","SW"="red"))
+
+
+```
+
+The bar graph shows me that the Northwest has the highest amount of weather stations at low elevations and the souther east has the lowest amount of elevations at low elevations.At high elevations, NE has the highest amount of weather stations and the south east has the lowest amount.
+```{r}
+metfw_avg[!is.na(elev_cat) & !is.na(region)] %>%
+  ggplot(mapping=aes(x=elev_cat,fill=region))+
+  geom_bar(position="dodge")+
+  scale_fill_brewer(palette="Paired")+
+  labs(title="Weather stations -Elev Category by region",x="Elevation Category",y="Number of Weather Stations")
+```
+
+Dew point is:  NE=16.81,NW=21.36,SE=11.98, and SW=13.32.
+Wind speed is: NE=1.96,NW=1.83,SE=2.90,SW=3.15,
+
+```{r}
+metfw_avgmean<- metfw_avg[,.(
+   temp     = mean(temp,na.rm=TRUE),
+  wind.sp  = mean(wind.sp,na.rm=TRUE),
+  dew.point  = mean(dew.point,na.rm=TRUE),
+  lat      = mean(lat),
+  lon      = mean(lon), 
+  elev     = mean(elev,na.rm=TRUE)
+),by =c("region")]
+
+metfw_avgmean
+metfw_avg[!is.na(dew.point) & !is.na(region) & !is.na(wind.sp)] %>%
+ ggplot(mapping=aes(y=dew.point,x=region))+
+  stat_summary(fun.data = "mean_sdl")+
+  stat_summary(geom="errorbar")
+
+metfw_avg[!is.na(dew.point) & !is.na(region) & !is.na(wind.sp)] %>%
+ ggplot(mapping=aes(y=wind.sp,x=region))+
+  stat_summary(fun.data = "mean_sdl")+
+  stat_summary(geom="errorbar")
+
+```
+
+Relative humidity increases near the coasts, but overall it is higher in the East than it is in the West.
+```{r}
+  
+
+met_avg2 <- met[,.(rh = mean(rh,na.rm=TRUE), lat = mean(lat), lon = mean(lon)),  by=c("USAFID")]
+met_avg2 <- met_avg2[!is.na(rh)]
+
+top10<-met_avg2[rank(-met_avg2$rh)<=10]
+top10
+# Generating a color palette
+rh.pal <- colorNumeric(c('darkgreen','goldenrod','brown'), domain=met_avg2$rh)
+rh.pal
+
+rhmap <- leaflet(met_avg2) %>% 
+  # The looks of the Map
+  addProviderTiles('CartoDB.Positron') %>% 
+  # Some circles
+  addCircles(
+    lat = ~lat, lng=~lon,
+                                                  # HERE IS OUR PAL!
+    label = ~paste0(round(rh,2), ' %'), color = ~ rh.pal(rh),
+    opacity = 1, fillOpacity = 1, radius = 500
+    ) %>%
+  # And a pretty legend
+  addLegend('bottomleft', pal=rh.pal, values=met_avg2$rh,
+          title='Relative Humidity, %', opacity=1) %>%
+  addMarkers(lng=top10$lon,lat=top10$lat)
+
+rhmap
+```
+
+```{r}
+
+library(ggforce)
+
+ggplot(metfw_avg, aes(x=elev, y=temp, color = region)) +
+  geom_point() +
+  facet_zoom(x = Location=="SW")
+```
+
