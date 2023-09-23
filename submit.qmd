@@ -15,6 +15,9 @@ First download and then read in with data.table::fread()
 library(tidyverse)
 library(data.table)
 library(leaflet)
+library(dplyr)
+library(devtools)
+library(R.utils)
 ```
 
 
